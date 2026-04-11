@@ -1,0 +1,1277 @@
+// Motor de IA ahora gestionado por Puter.js
+let conocimiento = "";
+
+// Intentamos cargar el conocimiento local al iniciar
+fetch('conocimiento.txt')
+    .then(response => {
+        if (!response.ok) throw new Error("Error HTTP " + response.status);
+        return response.text();
+    })
+    .then(text => {
+        conocimiento = text;
+        console.log("Conocimiento cargado exitosamente (" + text.length + " caracteres).");
+    })
+    .catch(err => {
+        console.warn("No se pudo cargar conocimiento.txt. Si estás abriendo el HTML directo sin servidor (file://), esto es un error de CORS normal. Por favor abre esto con Live Server en VS Code o similar para que la IA pueda leer tu PDF convertido.", err);
+        conocimiento = "No se ha podido cargar tu documento PDF por un problema de permisos en el navegador sin servidor web. Por ahora usaré mi conocimiento general.";
+    });
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Referencias DOM
+    const homeView = document.getElementById('home-view');
+    const chatView = document.getElementById('chat-view');
+    const pillButtons = document.querySelectorAll('.pill-btn');
+    const brand = document.querySelector('.brand');
+    const chatHistory = document.getElementById('chat-history');
+    const chatInput = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('send-btn');
+    const menuBtn = document.getElementById('menu-btn');
+    const sidebar = document.getElementById('sidebar');
+    const newChatBtn = document.getElementById('new-chat-btn');
+    const historyList = document.getElementById('history-list');
+
+    // Admin views
+    const adminView = document.getElementById('admin-view');
+    const normalProfile = document.getElementById('normal-profile');
+    const adminProfile = document.getElementById('admin-profile');
+
+    // Login view
+    const loginView = document.getElementById('login-view');
+    const studentLoginView = document.getElementById('student-login-view');
+    const profileDropdown = document.getElementById('profile-dropdown');
+    const navBtnAdminLogin = document.getElementById('nav-btn-admin-login');
+    const navBtnStudentLogin = document.getElementById('nav-btn-student-login');
+    const navBtnLogout = document.getElementById('nav-btn-logout');
+
+    // Student Form and Info
+    const studentSubmitBtn = document.getElementById('student-submit-btn');
+    const studentNameDisplay = document.getElementById('student-name-display');
+    const studentNombreInput = document.getElementById('student-nombre');
+    const studentEdadInput = document.getElementById('student-edad');
+    const studentCursoInput = document.getElementById('student-curso');
+
+    // Admin Form and Info
+    const adminSubmitBtn = document.getElementById('admin-submit-btn');
+    const adminHeaderNameDisplay = document.getElementById('admin-header-name-display');
+    const adminUserInput = document.getElementById('admin-user');
+    const adminPassInput = document.getElementById('admin-pass');
+    const adminRoleInput = document.getElementById('admin-role');
+
+    // Home Chat
+    const homeChatInput = document.getElementById('home-chat-input');
+    const homeSendBtn = document.getElementById('home-send-btn');
+
+    // Docente Add View Reference
+    const docenteNavAddBtn = document.getElementById('docente-nav-add-btn');
+    const docenteAddView = document.getElementById('docente-add-view');
+    const addPreguntaInput = document.getElementById('add-pregunta-input');
+    const addRespuestaInput = document.getElementById('add-respuesta-input');
+    const addPublicarBtn = document.getElementById('add-publicar-btn');
+    const addVolverBtn = document.getElementById('add-volver-btn');
+
+    // Docente Edit View Reference
+    const docenteNavEditBtn = document.getElementById('docente-nav-edit-btn');
+    const docenteEditView = document.getElementById('docente-edit-view');
+    const editLoadPreguntasBtn = document.getElementById('edit-load-preguntas-btn');
+    const editLoadRespuestasBtn = document.getElementById('edit-load-respuestas-btn');
+    const editPreguntasList = document.getElementById('edit-preguntas-list');
+    const editRespuestasList = document.getElementById('edit-respuestas-list');
+    const editPublicarBtn = document.getElementById('edit-publicar-btn');
+    const editVolverBtn = document.getElementById('edit-volver-btn');
+
+    // Docente Delete View Reference
+    const docenteNavDeleteBtn = document.getElementById('docente-nav-delete-btn');
+    const docenteDeleteView = document.getElementById('docente-delete-view');
+    const deleteSearchBtn = document.getElementById('delete-search-btn');
+    const deleteExecuteBtn = document.getElementById('delete-execute-btn');
+    const deleteInfoList = document.getElementById('delete-info-list');
+    const deleteVolverBtn = document.getElementById('delete-volver-btn');
+    const deleteSaveBtn = document.getElementById('delete-save-btn');
+
+    // Coordinador View Reference
+    const coordinadorNavUpdatesBtn = document.getElementById('coordinador-nav-updates-btn');
+    const coordinadorUpdatesView = document.getElementById('coordinador-updates-view');
+    const updatesVolverBtn = document.getElementById('updates-volver-btn');
+
+    // System Admin Reference
+    const adminNavUsersBtn = document.getElementById('admin-nav-users-btn');
+    const adminUsersView = document.getElementById('admin-users-view');
+    const usersTableBody = document.getElementById('users-table-body');
+    const usersAddBtn = document.getElementById('users-add-btn');
+    const usersSaveBtn = document.getElementById('users-save-btn');
+    const usersVolverBtn = document.getElementById('users-volver-btn');
+
+    // Logout Modal
+    const logoutModal = document.getElementById('logout-modal');
+    const logoutConfirmBtn = document.getElementById('logout-confirm-btn');
+    const logoutCancelBtn = document.getElementById('logout-cancel-btn');
+
+    // Delete Modal Reference
+    const deleteConfirmModal = document.getElementById('delete-confirm-modal');
+    const noShowDeleteAgain = document.getElementById('no-show-delete-again');
+    const btnCancelDelete = document.getElementById('btn-cancel-delete');
+    const btnConfirmDelete = document.getElementById('btn-confirm-delete');
+    let silenceDeleteWarning = false;
+
+    // Config views
+    const configBtn = document.getElementById('config-btn');
+    const settingsModal = document.getElementById('settings-modal');
+    const closeSettingsBtn = document.getElementById('close-settings-btn');
+
+    // Toggles
+    const toggleTheme = document.getElementById('toggle-theme');
+    const toggleContrast = document.getElementById('toggle-contrast');
+    const toggleAnimations = document.getElementById('toggle-animations');
+
+    // Robot Interactivity Reference (Home)
+    const homeRobot = document.querySelector('.home-view .bot-avatar');
+    const eyeLeft = document.getElementById('eye-left');
+    const eyeRight = document.getElementById('eye-right');
+    const robotMouth = document.getElementById('robot-mouth');
+    const robotHandRight = document.getElementById('robot-hand-right');
+    let isRobotGreeting = false;
+
+    // --- CARGAR PREFERENCIAS ---
+    const loadPreferences = () => {
+        const theme = localStorage.getItem('chatbot_theme') === 'light';
+        const contrast = localStorage.getItem('chatbot_contrast') === 'true';
+        const animations = localStorage.getItem('chatbot_animations') === 'true';
+
+        toggleTheme.checked = theme;
+        toggleContrast.checked = contrast;
+        toggleAnimations.checked = animations;
+
+        if (theme) document.body.classList.add('light-theme');
+        if (contrast) document.body.classList.add('high-contrast');
+        if (animations) document.body.classList.add('no-animations');
+    };
+    loadPreferences();
+
+    // Guardar Preferencias
+    toggleTheme.addEventListener('change', (e) => {
+        localStorage.setItem('chatbot_theme', e.target.checked ? 'light' : 'dark');
+        document.body.classList.toggle('light-theme', e.target.checked);
+    });
+
+    toggleContrast.addEventListener('change', (e) => {
+        localStorage.setItem('chatbot_contrast', e.target.checked);
+        document.body.classList.toggle('high-contrast', e.target.checked);
+    });
+
+    toggleAnimations.addEventListener('change', (e) => {
+        localStorage.setItem('chatbot_animations', e.target.checked);
+        document.body.classList.toggle('no-animations', e.target.checked);
+    });
+
+    // Abrir/Cerrar Modal de Configuración
+    if (configBtn) {
+        configBtn.addEventListener('click', () => {
+            settingsModal.classList.remove('hidden');
+        });
+    }
+
+    if (closeSettingsBtn) {
+        closeSettingsBtn.addEventListener('click', () => {
+            settingsModal.classList.add('hidden');
+        });
+    }
+
+    settingsModal.addEventListener('click', (e) => {
+        if (e.target === settingsModal) {
+            settingsModal.classList.add('hidden');
+        }
+    });
+
+    const hideAllViews = () => {
+        if (homeView) homeView.classList.add('hidden');
+        if (chatView) chatView.classList.add('hidden');
+        if (adminView) adminView.classList.add('hidden');
+        if (docenteAddView) docenteAddView.classList.add('hidden');
+        if (docenteEditView) docenteEditView.classList.add('hidden');
+        if (docenteDeleteView) docenteDeleteView.classList.add('hidden');
+        if (coordinadorUpdatesView) coordinadorUpdatesView.classList.add('hidden');
+        if (adminUsersView) adminUsersView.classList.add('hidden');
+        if (loginView) loginView.classList.add('hidden');
+        if (studentLoginView) studentLoginView.classList.add('hidden');
+    };
+
+    // --- SESION GLOBAL (Estudiante / Docente) ---
+    let studentUser = JSON.parse(localStorage.getItem('student_session'));
+    let adminUser = JSON.parse(localStorage.getItem('admin_session'));
+
+    const updateAuthUI = () => {
+        const isUserLoggedIn = (adminUser && adminUser.usuario) || (studentUser && studentUser.nombre);
+
+        // Control de visibilidad del dropdown de perfil según requerimiento
+        if (navBtnStudentLogin) navBtnStudentLogin.classList.toggle('hidden', isUserLoggedIn);
+        if (navBtnLogout) navBtnLogout.classList.toggle('hidden', !isUserLoggedIn);
+        if (navBtnAdminLogin) navBtnAdminLogin.classList.remove('hidden'); // Siempre visible o según el deseo del usuario
+
+        // Resetear visibilidad de contenedores de perfil
+        if (normalProfile) normalProfile.classList.add('hidden');
+        if (adminProfile) adminProfile.classList.add('hidden');
+
+        if (adminUser && (adminUser.rol === "Docente" || adminUser.rol === "Coordinador(a)" || adminUser.rol === "Administrador del sistema")) {
+            // Es Administrador
+            if (adminHeaderNameDisplay) adminHeaderNameDisplay.textContent = adminUser.usuario;
+            if (adminProfile) adminProfile.classList.remove('hidden');
+            
+            // Visibilidad de funciones por Jerarquía
+            const isCoordinador = adminUser.rol === "Coordinador(a)";
+            const isAdmin = adminUser.rol === "Administrador del sistema";
+
+            if (coordinadorNavUpdatesBtn) {
+                if (isCoordinador || isAdmin) coordinadorNavUpdatesBtn.classList.remove('hidden');
+                else coordinadorNavUpdatesBtn.classList.add('hidden');
+            }
+
+            if (adminNavUsersBtn) {
+                if (isAdmin) adminNavUsersBtn.classList.remove('hidden');
+                else adminNavUsersBtn.classList.add('hidden');
+            }
+
+            if (loginView) loginView.classList.add('hidden');
+            if (studentLoginView) studentLoginView.classList.add('hidden');
+        } else if (studentUser && studentUser.nombre) {
+            // Es Estudiante
+            if (studentNameDisplay) {
+                studentNameDisplay.textContent = studentUser.nombre;
+                studentNameDisplay.classList.remove('hidden');
+            }
+            if (normalProfile) normalProfile.classList.remove('hidden');
+        } else {
+            // Modo Anónimo
+            if (studentNameDisplay) studentNameDisplay.classList.add('hidden');
+            if (normalProfile) normalProfile.classList.remove('hidden');
+        }
+    };
+
+    // Al iniciar, chequeamos
+    updateAuthUI();
+
+    if (studentSubmitBtn) {
+        studentSubmitBtn.addEventListener('click', () => {
+            const nombre = studentNombreInput.value.trim();
+            const edad = studentEdadInput.value.trim();
+            const curso = studentCursoInput.value.trim();
+
+            if (nombre && edad && curso) {
+                studentUser = { nombre, edad, curso };
+                localStorage.setItem('student_session', JSON.stringify(studentUser));
+                // Opcional: desconectar admin si existía
+                localStorage.removeItem('admin_session');
+                adminUser = null;
+
+                updateAuthUI();
+
+                // Limpiar inputs
+                studentNombreInput.value = '';
+                studentEdadInput.value = '';
+                studentCursoInput.value = '';
+
+                // Volver a la pantalla principal
+                studentLoginView.classList.add('hidden');
+                homeView.classList.remove('hidden');
+            }
+        });
+    }
+
+    if (adminSubmitBtn) {
+        adminSubmitBtn.addEventListener('click', () => {
+            const usuario = adminUserInput.value.trim();
+            const password = adminPassInput.value.trim(); // Podríamos validarlo luego
+            const rol = adminRoleInput.value;
+
+            if (usuario && password && (rol === "Docente" || rol === "Coordinador(a)" || rol === "Administrador del sistema")) {
+                adminUser = { usuario, rol };
+                localStorage.setItem('admin_session', JSON.stringify(adminUser));
+
+                // Limpiar estudiante si lo habia
+                localStorage.removeItem('student_session');
+                studentUser = null;
+
+                // Limpiar form
+                adminUserInput.value = '';
+                adminPassInput.value = '';
+                adminRoleInput.value = '';
+
+                updateAuthUI();
+                // Redirigir al Home tras login exitoso
+                hideAllViews();
+                homeView.classList.remove('hidden');
+            }
+        });
+    }
+
+    if (navBtnLogout) {
+        navBtnLogout.addEventListener('click', () => {
+            profileDropdown.classList.add('hidden');
+            logoutModal.classList.remove('hidden');
+        });
+    }
+
+    if (logoutCancelBtn) {
+        logoutCancelBtn.addEventListener('click', () => {
+            logoutModal.classList.add('hidden');
+        });
+    }
+
+    if (logoutConfirmBtn) {
+        logoutConfirmBtn.addEventListener('click', () => {
+            localStorage.removeItem('student_session');
+            localStorage.removeItem('admin_session');
+            studentUser = null;
+            adminUser = null;
+
+            updateAuthUI();
+            logoutModal.classList.add('hidden');
+
+            // Borrar chats si cierra sesión
+            localStorage.removeItem('chatbot_history');
+            conversaciones = [];
+            currentChatId = null;
+            renderHistory();
+            chatHistory.innerHTML = '';
+
+            hideAllViews();
+            homeView.classList.remove('hidden');
+        });
+    }
+
+    // --- NAVEGACION DOCENTE ---
+    if (docenteNavAddBtn) {
+        docenteNavAddBtn.addEventListener('click', () => {
+            adminView.classList.add('hidden');
+            docenteAddView.classList.remove('hidden');
+        });
+    }
+
+    if (docenteNavEditBtn) {
+        docenteNavEditBtn.addEventListener('click', () => {
+            adminView.classList.add('hidden');
+            docenteEditView.classList.remove('hidden');
+            // Reset listas al entrar
+            editPreguntasList.innerHTML = '<p class="empty-list-msg">Haz clic en el botón rojo para buscar...</p>';
+            editRespuestasList.innerHTML = '<p class="empty-list-msg">Haz clic en el botón amarillo...</p>';
+        });
+    }
+
+    if (docenteNavDeleteBtn) {
+        docenteNavDeleteBtn.addEventListener('click', () => {
+            adminView.classList.add('hidden');
+            docenteDeleteView.classList.remove('hidden');
+            deleteInfoList.innerHTML = '<p class="empty-list-msg">Haz clic en "Buscar información" para comenzar...</p>';
+            deleteExecuteBtn.classList.add('hidden');
+        });
+    }
+
+    if (coordinadorNavUpdatesBtn) {
+        coordinadorNavUpdatesBtn.addEventListener('click', () => {
+            adminView.classList.add('hidden');
+            coordinadorUpdatesView.classList.remove('hidden');
+        });
+    }
+
+    if (addVolverBtn) {
+        addVolverBtn.addEventListener('click', () => {
+            docenteAddView.classList.add('hidden');
+            adminView.classList.remove('hidden');
+        });
+    }
+
+    if (editVolverBtn) {
+        editVolverBtn.addEventListener('click', () => {
+            docenteEditView.classList.add('hidden');
+            adminView.classList.remove('hidden');
+        });
+    }
+
+    if (deleteVolverBtn) {
+        deleteVolverBtn.addEventListener('click', () => {
+            docenteDeleteView.classList.add('hidden');
+            adminView.classList.remove('hidden');
+        });
+    }
+
+    if (updatesVolverBtn) {
+        updatesVolverBtn.addEventListener('click', () => {
+            coordinadorUpdatesView.classList.add('hidden');
+            adminView.classList.remove('hidden');
+        });
+    }
+
+    if (adminNavUsersBtn) {
+        adminNavUsersBtn.addEventListener('click', () => {
+            adminView.classList.add('hidden');
+            adminUsersView.classList.remove('hidden');
+            renderUsersTable();
+        });
+    }
+
+    if (usersVolverBtn) {
+        usersVolverBtn.addEventListener('click', () => {
+            adminUsersView.classList.add('hidden');
+            adminView.classList.remove('hidden');
+        });
+    }
+
+    // --- LOGICA DE GESTION DE USUARIOS ---
+    let localUsers = [];
+
+    const renderUsersTable = () => {
+        localUsers = JSON.parse(localStorage.getItem('system_users')) || [
+            { usuario: 'Admin', pass: 'Admin123', rol: 'Administrador del sistema' },
+            { usuario: 'Docente1', pass: 'Docente123', rol: 'Docente' }
+        ];
+
+        usersTableBody.innerHTML = '';
+        localUsers.forEach((u, index) => {
+            const row = document.createElement('tr');
+            row.className = 'user-row';
+
+            row.innerHTML = `
+                <td class="col-user">${u.usuario}</td>
+                <td class="col-pass">********</td>
+                <td class="col-rol">${u.rol}</td>
+                <td class="col-actions">
+                    <div class="user-actions">
+                        <button class="edit-icon-btn pencil" title="Editar"><i class="ph ph-pencil-simple"></i></button>
+                        <button class="edit-icon-btn trash" title="Eliminar"><i class="ph ph-trash"></i></button>
+                    </div>
+                </td>
+            `;
+
+            // Lógica de Edición Inline
+            const pencil = row.querySelector('.pencil');
+            pencil.onclick = () => {
+                row.innerHTML = `
+                    <td><input type="text" class="user-inline-input" value="${u.usuario}"></td>
+                    <td><input type="text" class="user-inline-input" value="${u.pass}"></td>
+                    <td>
+                        <select class="user-inline-select">
+                            <option ${u.rol === 'Docente' ? 'selected' : ''}>Docente</option>
+                            <option ${u.rol === 'Coordinador(a)' ? 'selected' : ''}>Coordinador(a)</option>
+                            <option ${u.rol === 'Administrador del sistema' ? 'selected' : ''}>Administrador del sistema</option>
+                        </select>
+                    </td>
+                    <td>
+                        <button class="edit-icon-btn pencil save-row-btn" title="Confirmar"><i class="ph ph-check"></i></button>
+                    </td>
+                `;
+
+                const saveBtn = row.querySelector('.save-row-btn');
+                saveBtn.onclick = () => {
+                    const inputs = row.querySelectorAll('input');
+                    const select = row.querySelector('select');
+                    localUsers[index] = {
+                        usuario: inputs[0].value,
+                        pass: inputs[1].value,
+                        rol: select.value
+                    };
+                    renderUsersTableManual(); // Redibuja con los nuevos datos locales
+                };
+            };
+
+            const trash = row.querySelector('.trash');
+            trash.onclick = () => {
+                if (confirm(`¿Eliminar al usuario ${u.usuario}?`)) {
+                    localUsers.splice(index, 1);
+                    renderUsersTableManual();
+                }
+            };
+
+            usersTableBody.appendChild(row);
+        });
+    };
+
+    // Función auxiliar para renderizar sin recargar de localStorage
+    const renderUsersTableManual = () => {
+        usersTableBody.innerHTML = '';
+        localUsers.forEach((u, index) => {
+            const row = document.createElement('tr');
+            row.className = 'user-row';
+            row.innerHTML = `
+                <td class="col-user">${u.usuario}</td>
+                <td class="col-pass">********</td>
+                <td class="col-rol">${u.rol}</td>
+                <td class="col-actions">
+                    <div class="user-actions">
+                        <button class="edit-icon-btn pencil" title="Editar"><i class="ph ph-pencil-simple"></i></button>
+                        <button class="edit-icon-btn trash" title="Eliminar"><i class="ph ph-trash"></i></button>
+                    </div>
+                </td>
+            `;
+
+            row.querySelector('.pencil').onclick = () => {
+                // Reutilizar lógica de edición...
+                pencilClick(row, u, index);
+            };
+
+            row.querySelector('.trash').onclick = () => {
+                if (confirm(`¿Eliminar al usuario ${u.usuario}?`)) {
+                    localUsers.splice(index, 1);
+                    renderUsersTableManual();
+                }
+            };
+
+            usersTableBody.appendChild(row);
+        });
+    };
+
+    const pencilClick = (row, u, index) => {
+        row.innerHTML = `
+            <td><input type="text" class="user-inline-input" value="${u.usuario}"></td>
+            <td><input type="text" class="user-inline-input" value="${u.pass}"></td>
+            <td>
+                <select class="user-inline-select">
+                    <option ${u.rol === 'Docente' ? 'selected' : ''}>Docente</option>
+                    <option ${u.rol === 'Coordinador(a)' ? 'selected' : ''}>Coordinador(a)</option>
+                    <option ${u.rol === 'Administrador del sistema' ? 'selected' : ''}>Administrador del sistema</option>
+                </select>
+            </td>
+            <td>
+                <button class="edit-icon-btn pencil save-row-btn" title="Confirmar"><i class="ph ph-check"></i></button>
+            </td>
+        `;
+        row.querySelector('.save-row-btn').onclick = () => {
+            const inputs = row.querySelectorAll('input');
+            const select = row.querySelector('select');
+            localUsers[index] = {
+                usuario: inputs[0].value,
+                pass: inputs[1].value,
+                rol: select.value
+            };
+            renderUsersTableManual();
+        };
+    };
+
+    if (usersAddBtn) {
+        usersAddBtn.addEventListener('click', () => {
+            const newIndex = localUsers.length;
+            const u = { usuario: 'Nuevo', pass: 'Pass123', rol: 'Docente' };
+            localUsers.push(u);
+            renderUsersTableManual();
+            // Abrir edición inmediatamente para la nueva fila
+            const lastRow = usersTableBody.lastElementChild;
+            pencilClick(lastRow, u, newIndex);
+        });
+    }
+
+    if (usersSaveBtn) {
+        usersSaveBtn.addEventListener('click', () => {
+            localStorage.setItem('system_users', JSON.stringify(localUsers));
+            alert("¡Base de datos de usuarios actualizada con éxito!");
+        });
+    }
+
+    // --- LOGICA DE ELIMINACION MASIVA ---
+    let localDeleteKnowledge = [];
+    let selectedIndices = new Set();
+
+    const renderDeleteList = () => {
+        if (localDeleteKnowledge.length === 0) {
+            deleteInfoList.innerHTML = '<p class="empty-list-msg">No hay información para mostrar o ya fue eliminada.</p>';
+            deleteExecuteBtn.classList.add('hidden');
+            return;
+        }
+
+        deleteInfoList.innerHTML = '';
+        deleteExecuteBtn.classList.remove('hidden');
+
+        localDeleteKnowledge.forEach((item, index) => {
+            const row = document.createElement('div');
+            row.className = 'delete-item';
+
+            const checkbox = document.createElement('div');
+            checkbox.className = 'custom-checkbox';
+            if (selectedIndices.has(index)) checkbox.classList.add('checked');
+            checkbox.innerHTML = '<i class="ph-bold ph-check"></i>';
+
+            const textContent = document.createElement('div');
+            textContent.className = 'delete-item-text';
+            textContent.innerHTML = `
+                <div><strong>P:</strong> ${item.pregunta}</div>
+                <div><strong>R:</strong> ${item.respuesta}</div>
+                <span class="delete-item-info">Fuente: Conocimiento Cargado por Docente</span>
+            `;
+
+            row.addEventListener('click', () => {
+                if (selectedIndices.has(index)) {
+                    selectedIndices.delete(index);
+                    checkbox.classList.remove('checked');
+                } else {
+                    selectedIndices.add(index);
+                    checkbox.classList.add('checked');
+                }
+            });
+
+            row.appendChild(checkbox);
+            row.appendChild(textContent);
+            deleteInfoList.appendChild(row);
+        });
+    };
+
+    if (deleteSearchBtn) {
+        deleteSearchBtn.addEventListener('click', () => {
+            localDeleteKnowledge = JSON.parse(localStorage.getItem('added_knowledge')) || [];
+            selectedIndices.clear();
+            renderDeleteList();
+        });
+    }
+
+    if (deleteExecuteBtn) {
+        deleteExecuteBtn.addEventListener('click', () => {
+            if (selectedIndices.size === 0) {
+                alert("Por favor selecciona al menos un elemento para eliminar.");
+                return;
+            }
+
+            if (confirm(`¿Estás seguro de que deseas eliminar estos ${selectedIndices.size} elementos de la memoria?`)) {
+                // Filtrar los que no están seleccionados
+                localDeleteKnowledge = localDeleteKnowledge.filter((_, index) => !selectedIndices.has(index));
+                selectedIndices.clear();
+                renderDeleteList();
+            }
+        });
+    }
+
+    if (deleteSaveBtn) {
+        deleteSaveBtn.addEventListener('click', () => {
+            localStorage.setItem('added_knowledge', JSON.stringify(localDeleteKnowledge));
+            alert("¡La base de conocimientos ha sido actualizada y guardada!");
+        });
+    }
+
+    // --- LOGICA DE EDICION ---
+    let localEditedKnowledge = [];
+
+    const renderEditList = (type) => {
+        const container = type === 'pregunta' ? editPreguntasList : editRespuestasList;
+
+        if (localEditedKnowledge.length === 0) {
+            container.innerHTML = '<p class="empty-list-msg">No hay contenido cargado para editar.</p>';
+            return;
+        }
+
+        container.innerHTML = '';
+        localEditedKnowledge.forEach((item, index) => {
+            const row = document.createElement('div');
+            row.className = 'edit-row';
+
+            const textSpan = document.createElement('span');
+            textSpan.className = 'edit-text';
+            textSpan.textContent = type === 'pregunta' ? item.pregunta : item.respuesta;
+
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'edit-row-actions';
+
+            const editBtn = document.createElement('button');
+            editBtn.className = 'edit-icon-btn pencil';
+            editBtn.innerHTML = '<i class="ph-bold ph-pencil-simple"></i>';
+
+            const deleteRowBtn = document.createElement('button');
+            deleteRowBtn.className = 'edit-icon-btn trash';
+            deleteRowBtn.innerHTML = '<i class="ph-bold ph-trash"></i>';
+
+            editBtn.addEventListener('click', () => {
+                const currentText = textSpan.textContent;
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'edit-inline-input';
+                input.value = currentText;
+
+                row.replaceChild(input, textSpan);
+                input.focus();
+
+                const saveInline = () => {
+                    const newValue = input.value.trim();
+                    if (newValue) {
+                        textSpan.textContent = newValue;
+                        // Actualizamos en nuestro array temporal
+                        if (type === 'pregunta') {
+                            localEditedKnowledge[index].pregunta = newValue;
+                        } else {
+                            localEditedKnowledge[index].respuesta = newValue;
+                        }
+                    }
+                    row.replaceChild(textSpan, input);
+                };
+
+                input.addEventListener('blur', saveInline);
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') saveInline();
+                });
+            });
+
+            deleteRowBtn.addEventListener('click', () => {
+                const doDelete = () => {
+                    localEditedKnowledge.splice(index, 1);
+                    renderEditList(type);
+                };
+
+                if (silenceDeleteWarning) {
+                    doDelete();
+                } else {
+                    deleteConfirmModal.classList.remove('hidden');
+
+                    // Manejadores temporales para este item
+                    const onConfirm = () => {
+                        if (noShowDeleteAgain.checked) silenceDeleteWarning = true;
+                        deleteConfirmModal.classList.add('hidden');
+                        doDelete();
+                        cleanup();
+                    };
+                    const onCancel = () => {
+                        deleteConfirmModal.classList.add('hidden');
+                        cleanup();
+                    };
+                    const cleanup = () => {
+                        btnConfirmDelete.removeEventListener('click', onConfirm);
+                        btnCancelDelete.removeEventListener('click', onCancel);
+                    };
+
+                    btnConfirmDelete.addEventListener('click', onConfirm);
+                    btnCancelDelete.addEventListener('click', onCancel);
+                }
+            });
+
+            actionsDiv.appendChild(editBtn);
+            actionsDiv.appendChild(deleteRowBtn);
+            row.appendChild(textSpan);
+            row.appendChild(actionsDiv);
+            container.appendChild(row);
+        });
+    };
+
+    if (editLoadPreguntasBtn) {
+        editLoadPreguntasBtn.addEventListener('click', () => {
+            localEditedKnowledge = JSON.parse(localStorage.getItem('added_knowledge')) || [];
+            renderEditList('pregunta');
+        });
+    }
+
+    if (editLoadRespuestasBtn) {
+        editLoadRespuestasBtn.addEventListener('click', () => {
+            localEditedKnowledge = JSON.parse(localStorage.getItem('added_knowledge')) || [];
+            renderEditList('respuesta');
+        });
+    }
+
+    if (editPublicarBtn) {
+        editPublicarBtn.addEventListener('click', () => {
+            if (localEditedKnowledge.length > 0) {
+                localStorage.setItem('added_knowledge', JSON.stringify(localEditedKnowledge));
+                alert("¡Cambios guardados globalmente con éxito!");
+            } else {
+                alert("No hay cambios que guardar.");
+            }
+        });
+    }
+
+    if (addPublicarBtn) {
+        addPublicarBtn.addEventListener('click', () => {
+            const preg = addPreguntaInput.value.trim();
+            const resp = addRespuestaInput.value.trim();
+
+            if (!preg || !resp) {
+                alert("Por favor completa ambos campos antes de publicar.");
+                return;
+            }
+
+            // Guardar en LocalStorage
+            let addedKnowledge = JSON.parse(localStorage.getItem('added_knowledge')) || [];
+            addedKnowledge.push({ pregunta: preg, respuesta: resp });
+            localStorage.setItem('added_knowledge', JSON.stringify(addedKnowledge));
+
+            // Feedback visual
+            alert("¡Pregunta y respuesta publicadas con éxito! Ahora el bot las recordará.");
+
+            // Limpiar y volver
+            addPreguntaInput.value = '';
+            addRespuestaInput.value = '';
+            addVolverBtn.click();
+        });
+    }
+
+    // --- SISTEMA DE MEMORIA (LocalStorage) ---
+    // Estructura: conversaciones = [ { id: 123, titulo: "Tema", mensajes: [{role: "user", parts: [{text: "Hola"}]}, {role: "model", parts: [...]}] } ]
+    let conversaciones = JSON.parse(localStorage.getItem('chatbot_history')) || [];
+    let currentChatId = null;
+
+    renderHistory();
+
+    function saveHistory() {
+        localStorage.setItem('chatbot_history', JSON.stringify(conversaciones));
+        renderHistory();
+    }
+
+    function deleteChat(id) {
+        conversaciones = conversaciones.filter(c => c.id !== id);
+        saveHistory();
+        if (currentChatId === id) {
+            if (newChatBtn) newChatBtn.click();
+        }
+    }
+
+    function renderHistory() {
+        if (!historyList) return;
+        historyList.innerHTML = '';
+        conversaciones.forEach(chat => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'history-item-wrapper';
+
+            const btn = document.createElement('button');
+            btn.className = 'nav-btn history-item';
+
+            // Recortar titulo muy largo
+            let titulo = chat.titulo;
+            if (titulo.length > 20) titulo = titulo.substring(0, 17) + '...';
+
+            btn.innerHTML = `<i class="ph ph-chat-text"></i> <span class="sidebar-text">${titulo}</span>`;
+            btn.onclick = () => loadChat(chat.id);
+
+            const optionsBtn = document.createElement('button');
+            optionsBtn.className = 'chat-options-btn hidden-action';
+            optionsBtn.innerHTML = `<i class="ph ph-dots-three"></i>`;
+
+            const menuDiv = document.createElement('div');
+            menuDiv.className = 'chat-options-menu hidden';
+            menuDiv.innerHTML = `<button class="delete-option-btn"><i class="ph ph-trash"></i> Eliminar</button>`;
+
+            optionsBtn.onclick = (e) => {
+                e.stopPropagation();
+                // Ocultamos otros menús
+                document.querySelectorAll('.chat-options-menu').forEach(m => {
+                    if (m !== menuDiv) m.classList.add('hidden');
+                });
+                menuDiv.classList.toggle('hidden');
+            };
+
+            menuDiv.querySelector('.delete-option-btn').onclick = (e) => {
+                e.stopPropagation();
+                deleteChat(chat.id);
+            };
+
+            wrapper.appendChild(btn);
+            wrapper.appendChild(optionsBtn);
+            wrapper.appendChild(menuDiv);
+            historyList.appendChild(wrapper);
+        });
+    }
+
+    // Cierra modal de opciones al dar clic fuera
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.chat-options-btn')) {
+            document.querySelectorAll('.chat-options-menu').forEach(m => m.classList.add('hidden'));
+        }
+    });
+
+
+    function loadChat(id) {
+        currentChatId = id;
+        const chat = conversaciones.find(c => c.id === id);
+
+        hideAllViews();
+        chatView.classList.remove('hidden');
+
+        // Limpiamos la vista vieja y pintamos sus mensajes
+        chatHistory.innerHTML = '';
+        if (chat && chat.mensajes) {
+            chat.mensajes.forEach(msg => {
+                appendMessage(msg.role === 'user' ? 'user' : 'bot', msg.parts[0].text);
+            });
+        }
+
+        // Cerrar sidebar autómaticamente en móvil si estaba abierto
+        if (window.innerWidth < 768) {
+            sidebar.classList.remove('expanded');
+        }
+    }
+
+    function createNewChat(initialText = "Nueva conversación") {
+        currentChatId = Date.now(); // Usamos la estampa de tiempo como ID único
+        conversaciones.push({
+            id: currentChatId,
+            titulo: initialText,
+            mensajes: []
+        });
+        saveHistory();
+    }
+
+    // --- NAVEGACION BÁSICA ---
+    if (newChatBtn) {
+        newChatBtn.addEventListener('click', () => {
+            currentChatId = null;
+
+            hideAllViews();
+            homeView.classList.remove('hidden');
+
+            if (normalProfile) normalProfile.classList.remove('hidden');
+            if (adminProfile) adminProfile.classList.add('hidden');
+
+            chatHistory.innerHTML = '';
+            chatInput.value = '';
+        });
+    }
+
+    // Menú de opciones de perfil
+    document.querySelectorAll('.profile-icon').forEach(icon => {
+        icon.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (profileDropdown) profileDropdown.classList.toggle('hidden');
+        });
+    });
+
+    // Cerrar menú al hacer click afuera
+    document.addEventListener('click', (e) => {
+        if (profileDropdown && !profileDropdown.classList.contains('hidden') && !e.target.closest('.profile-container') && !e.target.closest('.profile-dropdown')) {
+            profileDropdown.classList.add('hidden');
+        }
+    });
+
+    // Botones del menú flotante de perfil
+    if (navBtnAdminLogin) {
+        navBtnAdminLogin.addEventListener('click', () => {
+            profileDropdown.classList.add('hidden');
+
+            // Si ya es administrador, ir directamente al panel de opciones
+            const rolesAdmin = ["Docente", "Coordinador(a)", "Administrador del sistema"];
+            if (adminUser && rolesAdmin.includes(adminUser.rol)) {
+                homeView.classList.add('hidden');
+                chatView.classList.add('hidden');
+                if (docenteAddView) docenteAddView.classList.add('hidden');
+                if (docenteEditView) docenteEditView.classList.add('hidden');
+                if (docenteDeleteView) docenteDeleteView.classList.add('hidden');
+                if (coordinadorUpdatesView) coordinadorUpdatesView.classList.add('hidden');
+                if (adminView) adminView.classList.remove('hidden');
+            } else {
+                // Si no, mostrar el formulario de login
+                homeView.classList.add('hidden');
+                chatView.classList.add('hidden');
+                if (adminView) adminView.classList.add('hidden');
+                if (docenteAddView) docenteAddView.classList.add('hidden');
+                if (docenteEditView) docenteEditView.classList.add('hidden');
+                if (docenteDeleteView) docenteDeleteView.classList.add('hidden');
+                if (coordinadorUpdatesView) coordinadorUpdatesView.classList.add('hidden');
+                if (studentLoginView) studentLoginView.classList.add('hidden');
+                if (loginView) loginView.classList.remove('hidden');
+            }
+        });
+    }
+
+    if (navBtnStudentLogin) {
+        navBtnStudentLogin.addEventListener('click', () => {
+            homeView.classList.add('hidden');
+            chatView.classList.add('hidden');
+            if (adminView) adminView.classList.add('hidden');
+            if (docenteAddView) docenteAddView.classList.add('hidden');
+            if (docenteEditView) docenteEditView.classList.add('hidden');
+            if (docenteDeleteView) docenteDeleteView.classList.add('hidden');
+            if (loginView) loginView.classList.add('hidden');
+            if (studentLoginView) studentLoginView.classList.remove('hidden');
+
+            if (normalProfile) normalProfile.classList.add('hidden');
+            if (adminProfile) adminProfile.classList.add('hidden');
+            profileDropdown.classList.add('hidden');
+        });
+    }
+
+    menuBtn.addEventListener('click', () => {
+        sidebar.classList.toggle('expanded');
+    });
+
+    brand.addEventListener('click', () => {
+        if (newChatBtn) newChatBtn.click();
+    });
+
+    // Clic en botones gigantes de colores (Opciones sugeridas)
+    pillButtons.forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const text = btn.textContent.trim();
+
+            homeView.classList.add('hidden');
+            if (loginView) loginView.classList.add('hidden');
+            if (studentLoginView) studentLoginView.classList.add('hidden');
+            chatView.classList.remove('hidden');
+            chatHistory.innerHTML = '';
+
+            // Creamos un chat titulado igual a la opción cliqueada
+            createNewChat(text);
+            appendMessage('user', text);
+
+            let chat = conversaciones.find(c => c.id === currentChatId);
+            chat.mensajes.push({ role: "user", parts: [{ text: text }] });
+            saveHistory();
+
+            await getAIResponse(text, chat);
+        });
+    });
+
+    // Lógica para la barra de chat de la HOME
+    if (homeChatInput && homeSendBtn) {
+        const handleHomeChat = async () => {
+            const text = homeChatInput.value.trim();
+            if(!text) return;
+
+            homeChatInput.value = '';
+            hideAllViews();
+            chatView.classList.remove('hidden');
+            
+            if (!currentChatId) {
+                createNewChat(text);
+            }
+
+            appendMessage('user', text);
+            let chat = conversaciones.find(c => c.id === currentChatId);
+            chat.mensajes.push({ role: "user", parts: [{ text: text }] });
+            saveHistory();
+
+            await getAIResponse(text, chat);
+        };
+
+        homeSendBtn.addEventListener('click', handleHomeChat);
+        homeChatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleHomeChat();
+        });
+    }
+
+    // --- ENVIO Y COMUNICACION IA ---
+    const sendMessage = async () => {
+        const text = chatInput.value.trim();
+        if (!text) return;
+
+        chatInput.value = '';
+
+        // Si mandan mensaje pero no habian creado chat, lo creamos
+        if (!currentChatId) {
+            createNewChat(text);
+        }
+
+        appendMessage('user', text);
+
+        let chat = conversaciones.find(c => c.id === currentChatId);
+        chat.mensajes.push({ role: "user", parts: [{ text: text }] });
+        saveHistory();
+
+        await getAIResponse(text, chat);
+    };
+
+    sendBtn.addEventListener('click', sendMessage);
+    chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendMessage();
+    });
+
+    function appendMessage(sender, text) {
+        const messageWrapper = document.createElement('div');
+        messageWrapper.classList.add('message-wrapper', sender);
+
+        if (sender === 'bot') {
+            const avatar = document.createElement('div');
+            avatar.className = 'bot-mini-avatar';
+            avatar.innerHTML = `
+                <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                    <g transform="translate(100, 100) scale(0.7)">
+                        <!-- Ramitas y Hojas -->
+                        <line x1="0" y1="-30" x2="5" y2="-45" stroke="#4a5022" stroke-width="3" stroke-linecap="round" />
+                        <path d="M 3 -40 Q -15 -42 -10 -55 Q 0 -55 3 -40" class="dynamic-fill" />
+                        <path d="M 5 -45 Q 25 -45 35 -60 Q 25 -65 5 -45" class="dynamic-fill" />
+                        
+                        <rect x="-55" y="-35" width="110" height="70" rx="25" fill="#F3F4F6" />
+                        <rect x="-35" y="-18" width="70" height="42" rx="10" fill="#0a0a0a" />
+                        <circle cx="-12" cy="0" r="5" fill="#ffffff" />
+                        <circle cx="12" cy="0" r="5" fill="#ffffff" />
+                        <path d="M -4 8 Q 0 16 4 8" stroke="#ffffff" stroke-width="3" fill="none" stroke-linecap="round" />
+                    </g>
+                </svg>
+            `;
+            messageWrapper.appendChild(avatar);
+        }
+
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message', sender);
+
+        if (text) {
+            let htmlText = text
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/\n/g, '<br>');
+            messageDiv.innerHTML = htmlText;
+        }
+
+        messageWrapper.appendChild(messageDiv);
+        chatHistory.appendChild(messageWrapper);
+
+        // Auto-Scroll suave
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                chatHistory.scrollTo({
+                    top: chatHistory.scrollHeight + 1000,
+                    behavior: 'smooth'
+                });
+            }, 50);
+        });
+
+        return messageWrapper;
+    }
+
+    // --- INTERACTIVIDAD ROBOT SALUDO ---
+    const showRobotExclamation = () => {
+        const greetings = ["¡Hola!", "¡Qué tal!", "¡Bienvenido!", "¡Gusto verte!", "¡Holi!"];
+        const text = greetings[Math.floor(Math.random() * greetings.length)];
+        
+        const floatingText = document.createElement('div');
+        floatingText.className = 'robot-exclamation greeting-bubble';
+        floatingText.textContent = text;
+        
+        const container = document.querySelector('.bot-glow-container');
+        if (container) {
+            container.appendChild(floatingText);
+            setTimeout(() => floatingText.remove(), 1000);
+        }
+    };
+
+    if (homeRobot) {
+        homeRobot.style.cursor = 'pointer';
+        let greetingTimeout;
+
+        homeRobot.addEventListener('click', () => {
+            if (greetingTimeout) clearTimeout(greetingTimeout);
+            showRobotExclamation();
+
+            // Solo saludo con la mano
+            if(robotHandRight) robotHandRight.classList.add('waving-hand');
+
+            // Volver a la normalidad automáticamente después de 2 segundos
+            greetingTimeout = setTimeout(() => {
+                if(robotHandRight) robotHandRight.classList.remove('waving-hand');
+                isRobotGreeting = false;
+            }, 2000);
+            
+            isRobotGreeting = true;
+        });
+    }
+
+    // --- BUSCADOR DE CONTEXTO RELEVANTE ---
+    const getRelevantContext = (query, fullText) => {
+        if (!fullText) return "No hay conocimiento cargado.";
+        
+        // Dividimos el documento por 'Unidad de Competencia' o 'Módulo' o 'Página'
+        const segments = fullText.split(/(?=Unidad de Competencia \d+:|MÓDULO \d+:|Página \d+)/gi);
+        
+        const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+        
+        const scored = segments.map(seg => {
+            let score = 0;
+            queryWords.forEach(word => {
+                const count = (seg.toLowerCase().match(new RegExp(word, 'g')) || []).length;
+                score += count;
+            });
+            return { seg, score };
+        });
+
+        // Tomamos los 5 segmentos con más coincidencias
+        const topSegments = scored
+            .filter(s => s.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 5)
+            .map(s => s.seg);
+
+        if (topSegments.length === 0) {
+            // Si no hay nada específico, enviamos el inicio del documento
+            return segments.slice(0, 3).join('\n\n');
+        }
+
+        return topSegments.join('\n\n');
+    };
+
+    async function getAIResponse(userText, chat) {
+        // Mostramos feedback visual inicial
+        const loadingMsg = appendMessage('bot', '<span class="typing">Consultando a Puter AI...</span>');
+
+        // Optimización: Solo enviamos el contexto realmente necesario del PDF
+        const relevantConocimiento = getRelevantContext(userText, conocimiento);
+
+        // Cargamos conocimiento extra del docente
+        const addedKnowledge = JSON.parse(localStorage.getItem('added_knowledge')) || [];
+        let extraText = "";
+        addedKnowledge.forEach(item => {
+            if (userText.toLowerCase().includes(item.pregunta.toLowerCase())) {
+                extraText += `PAGR REGISTRADA POR DOCENTE: Pregunta: ${item.pregunta} -> Respuesta: ${item.respuesta}\n`;
+            }
+        });
+
+        const baseInstructions = `Eres un bot académico de excelencia. Tienes una personalidad amable, profesional y muy conversacional.
+REGLA 1: Si el usuario te saluda o hace plática inicial, respóndele el saludo con naturalidad y amabilidad, y pregúntale en qué le puedes ayudar hoy.
+REGLA 2: Para las preguntas académicas o de contenido, debes responder estricta y ÚNICAMENTE usando la información proveída en tu conocimiento base (PDF + extras). NO inventes hechos.
+REGLA 3: Si no tienes la información, ofrece temas clave del conocimiento base.
+
+=== CONOCIMIENTO BASE SELECCIONADO (PDF) ===
+${relevantConocimiento}
+${extraText}
+=== FIN CONOCIMIENTO ===`;
+
+        const userContext = studentUser ? `\n\nCONTEXTO DEL USUARIO: El estudiante se llama ${studentUser.nombre}. Llámalo por su nombre.` : "";
+
+        try {
+            const messages = [{ role: 'system', content: baseInstructions + userContext }];
+
+            // Añadimos el historial previo
+            chat.mensajes.forEach(m => {
+                messages.push({
+                    role: m.role === 'model' ? 'assistant' : 'user',
+                    content: m.parts[0].text
+                });
+            });
+
+            // Llamada con STREAMING para respuesta instantánea (Puter v2)
+            const stream = await puter.ai.chat(messages, { 
+                stream: true, 
+                model: 'gpt-4o-mini' // Usamos un modelo más rápido y eficiente
+            });
+
+            // Quitamos el "cargando" y creamos el contenedor real
+            chatHistory.removeChild(loadingMsg);
+            const botMsgWrapper = appendMessage('bot', '');
+            const botMsgDiv = botMsgWrapper.querySelector('.message');
+            
+            let fullText = "";
+            for await (const part of stream) {
+                if (part.text) {
+                    fullText += part.text;
+                    // Renderizado progresivo de Markdown básico
+                    botMsgDiv.innerHTML = fullText
+                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                        .replace(/\n/g, '<br>');
+                    
+                    // Solo scrolleamos si estamos cerca del final
+                    chatHistory.scrollTop = chatHistory.scrollHeight;
+                }
+            }
+
+            // Guardamos en historial local al terminar
+            if (chat) {
+                chat.mensajes.push({ role: "model", parts: [{ text: fullText }] });
+                saveHistory();
+            }
+
+        } catch (err) {
+            console.error(err);
+            if (loadingMsg && loadingMsg.parentNode) chatHistory.removeChild(loadingMsg);
+            
+            const errorMessages = [
+                "¡Vaya! Puter AI está tomando un respiro. 🍃 Inténtalo de nuevo.",
+                "¡Ups! Los circuitos de Puter se enredaron un poco. 🤖 ¿Me lo repites?",
+                "Perdona, me distraje un segundo procesando con Puter. 🧠✨ ¿Reenviamos?",
+                "¡Cielos! Un error en el motor Puter. 📡 Inténtalo otra vez.",
+                "Parece que un bug se coló en el sistema Puter. 🐛 Inténtamos de nuevo."
+            ];
+            const randomMsg = errorMessages[Math.floor(Math.random() * errorMessages.length)];
+            appendMessage('bot', randomMsg);
+            if (chat) {
+                chat.mensajes.push({ role: "model", parts: [{ text: randomMsg }] });
+                saveHistory();
+            }
+        }
+    }
+});
