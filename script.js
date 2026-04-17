@@ -1,44 +1,41 @@
-// Configuración de Supabase
-const SUPABASE_URL = 'https://nanjqnyvcgxovghwfbgb.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5hbmpxbnl2Y2d4b3ZnaHdmYmdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzNzM3MTgsImV4cCI6MjA5MTk0OTcxOH0.yXx-6A4lpYPqh3dLdSGXpjq7Cp3C6QYDb1C72mYuVIg';
+// 1. CONFIGURACIÓN GLOBAL (Accesible desde cualquier parte)
+const SUPABASE_URL = 'https://nanjqnyvcgxovghwfbgb.supabase.co'; 
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5hbmpxbnl2Y2d4b3ZnaHdmYmdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzNzM3MTgsImV4cCI6MjA5MTk0OTcxOH0.yXx-6A4lpYPqh3dLdSGXpjq7Cp3C6QYDb1C72mYuVIg'; 
 
 let supabaseClient = null;
-
-// Intentamos inicializar Supabase solo si las credenciales no son las de marcador de posición
-if (SUPABASE_URL !== 'TU_URL_DE_SUPABASE' && SUPABASE_KEY !== 'TU_ANON_KEY_DE_SUPABASE') {
-    try {
-        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-        console.log("Supabase configurado correctamente.");
-    } catch (e) {
-        console.error("Error al inicializar Supabase:", e);
-    }
-} else {
-    console.warn("Supabase no está configurado. El bot funcionará en modo local y no guardará datos permanentemente.");
-}
-
 let conocimiento = "";
-let conversaciones = JSON.parse(localStorage.getItem('chatbot_history')) || [];
+let conversaciones = [];
+
+try {
+    conversaciones = JSON.parse(localStorage.getItem('chatbot_history')) || [];
+} catch(e) { 
+    console.warn("Error al cargar historial local:", e);
+    conversaciones = [];
+}
 
 function saveHistory() {
-    localStorage.setItem('chatbot_history', JSON.stringify(conversaciones));
+    try {
+        localStorage.setItem('chatbot_history', JSON.stringify(conversaciones));
+    } catch(e) { console.error("Error al guardar historial:", e); }
 }
 
-// Intentamos cargar el conocimiento local al iniciar
+// Inicialización segura de Supabase
+try {
+    if (SUPABASE_URL.includes('https')) {
+        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        console.log("Supabase OK.");
+    }
+} catch (e) { console.error("Error Supabase:", e); }
+
+// Carga de conocimiento (No bloqueante)
 fetch('conocimiento.txt')
-    .then(response => {
-        if (!response.ok) throw new Error("Error HTTP " + response.status);
-        return response.text();
-    })
-    .then(text => {
-        conocimiento = text;
-        console.log("Conocimiento cargado exitosamente (" + text.length + " caracteres).");
-    })
-    .catch(err => {
-        console.warn("No se pudo cargar conocimiento.txt localmente.", err);
-        conocimiento = "";
-    });
+    .then(r => r.text())
+    .then(t => { conocimiento = t; console.log("Conocimiento listo."); })
+    .catch(e => console.warn("Modo sin conocimiento.txt activo."));
 
 document.addEventListener('DOMContentLoaded', () => {
+    console.log("DOM Cargado. Iniciando interfaz...");
+
     // Referencias DOM
     const homeView = document.getElementById('home-view');
     const chatView = document.getElementById('chat-view');
