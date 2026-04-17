@@ -1,5 +1,27 @@
-// Motor de IA ahora gestionado por Puter.js
+// Configuración de Supabase
+const SUPABASE_URL = 'https://nanjqnyvcgxovghwfbgb.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5hbmpxbnl2Y2d4b3ZnaHdmYmdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzNzM3MTgsImV4cCI6MjA5MTk0OTcxOH0.yXx-6A4lpYPqh3dLdSGXpjq7Cp3C6QYDb1C72mYuVIg';
+
+let supabaseClient = null;
+
+// Intentamos inicializar Supabase solo si las credenciales no son las de marcador de posición
+if (SUPABASE_URL !== 'TU_URL_DE_SUPABASE' && SUPABASE_KEY !== 'TU_ANON_KEY_DE_SUPABASE') {
+    try {
+        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        console.log("Supabase configurado correctamente.");
+    } catch (e) {
+        console.error("Error al inicializar Supabase:", e);
+    }
+} else {
+    console.warn("Supabase no está configurado. El bot funcionará en modo local y no guardará datos permanentemente.");
+}
+
 let conocimiento = "";
+let conversaciones = JSON.parse(localStorage.getItem('chatbot_history')) || [];
+
+function saveHistory() {
+    localStorage.setItem('chatbot_history', JSON.stringify(conversaciones));
+}
 
 // Intentamos cargar el conocimiento local al iniciar
 fetch('conocimiento.txt')
@@ -12,8 +34,8 @@ fetch('conocimiento.txt')
         console.log("Conocimiento cargado exitosamente (" + text.length + " caracteres).");
     })
     .catch(err => {
-        console.warn("No se pudo cargar conocimiento.txt. Si estás abriendo el HTML directo sin servidor (file://), esto es un error de CORS normal. Por favor abre esto con Live Server en VS Code o similar para que la IA pueda leer tu PDF convertido.", err);
-        conocimiento = "No se ha podido cargar tu documento PDF por un problema de permisos en el navegador sin servidor web. Por ahora usaré mi conocimiento general.";
+        console.warn("No se pudo cargar conocimiento.txt localmente.", err);
+        conocimiento = "";
     });
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -200,47 +222,45 @@ document.addEventListener('DOMContentLoaded', () => {
     let adminUser = JSON.parse(localStorage.getItem('admin_session'));
 
     const updateAuthUI = () => {
-        const isUserLoggedIn = (adminUser && adminUser.usuario) || (studentUser && studentUser.nombre);
+        const isUserLoggedIn = (adminUser && adminUser.id_usuario) || (studentUser && studentUser.id_usuario);
 
-        // Control de visibilidad del dropdown de perfil según requerimiento
         if (navBtnStudentLogin) navBtnStudentLogin.classList.toggle('hidden', isUserLoggedIn);
         if (navBtnLogout) navBtnLogout.classList.toggle('hidden', !isUserLoggedIn);
-        if (navBtnAdminLogin) navBtnAdminLogin.classList.remove('hidden'); // Siempre visible o según el deseo del usuario
 
-        // Resetear visibilidad de contenedores de perfil
         if (normalProfile) normalProfile.classList.add('hidden');
         if (adminProfile) adminProfile.classList.add('hidden');
 
-        if (adminUser && (adminUser.rol === "Docente" || adminUser.rol === "Coordinador(a)" || adminUser.rol === "Administrador del sistema")) {
-            // Es Administrador
-            if (adminHeaderNameDisplay) adminHeaderNameDisplay.textContent = adminUser.usuario;
+        if (adminUser && adminUser.id_usuario) {
+            if (adminHeaderNameDisplay) adminHeaderNameDisplay.textContent = adminUser.usuario || adminUser.email;
             if (adminProfile) adminProfile.classList.remove('hidden');
-            
-            // Visibilidad de funciones por Jerarquía
-            const isCoordinador = adminUser.rol === "Coordinador(a)";
-            const isAdmin = adminUser.rol === "Administrador del sistema";
 
+            // Permisos Granulares
+            const isDocente = adminUser.id_rol === 2;
+            const isCoordinador = adminUser.id_rol === 4;
+            const isAdmin = adminUser.id_rol === 3;
+
+            // El Coordinador y el Admin ven las actualizaciones
             if (coordinadorNavUpdatesBtn) {
-                if (isCoordinador || isAdmin) coordinadorNavUpdatesBtn.classList.remove('hidden');
-                else coordinadorNavUpdatesBtn.classList.add('hidden');
+                coordinadorNavUpdatesBtn.classList.toggle('hidden', !(isCoordinador || isAdmin));
             }
 
+            // Solo el Admin ve la gestión de usuarios
             if (adminNavUsersBtn) {
-                if (isAdmin) adminNavUsersBtn.classList.remove('hidden');
-                else adminNavUsersBtn.classList.add('hidden');
+                adminNavUsersBtn.classList.toggle('hidden', !isAdmin);
             }
+
+            // Todos (Docente, Coord, Admin) pueden usar las funciones de Docente (Añadir/Editar/Borrar)
+            if (docenteNavAddBtn) docenteNavAddBtn.classList.toggle('hidden', !(isDocente || isAdmin));
 
             if (loginView) loginView.classList.add('hidden');
             if (studentLoginView) studentLoginView.classList.add('hidden');
         } else if (studentUser && studentUser.nombre) {
-            // Es Estudiante
             if (studentNameDisplay) {
                 studentNameDisplay.textContent = studentUser.nombre;
                 studentNameDisplay.classList.remove('hidden');
             }
             if (normalProfile) normalProfile.classList.remove('hidden');
         } else {
-            // Modo Anónimo
             if (studentNameDisplay) studentNameDisplay.classList.add('hidden');
             if (normalProfile) normalProfile.classList.remove('hidden');
         }
@@ -250,55 +270,125 @@ document.addEventListener('DOMContentLoaded', () => {
     updateAuthUI();
 
     if (studentSubmitBtn) {
-        studentSubmitBtn.addEventListener('click', () => {
+        studentSubmitBtn.addEventListener('click', async () => {
             const nombre = studentNombreInput.value.trim();
-            const edad = studentEdadInput.value.trim();
-            const curso = studentCursoInput.value.trim();
+            const grado = studentCursoInput.value.trim(); // Mapeamos curso -> grado en la DB
 
-            if (nombre && edad && curso) {
-                studentUser = { nombre, edad, curso };
-                localStorage.setItem('student_session', JSON.stringify(studentUser));
-                // Opcional: desconectar admin si existía
-                localStorage.removeItem('admin_session');
-                adminUser = null;
+            if (nombre && grado) {
+                try {
+                    // Acción Híbrida: Buscar o Crear Estudiante en SQL
+                    let { data: est, error } = await supabaseClient
+                        .from('estudiante')
+                        .select('*')
+                        .eq('nombre', nombre)
+                        .maybeSingle();
 
-                updateAuthUI();
+                    if (!est) {
+                        // Si no existe, lo creamos
+                        const { data: newEst } = await supabaseClient
+                            .from('estudiante')
+                            .insert([{ nombre, grado }])
+                            .select()
+                            .single();
+                        est = newEst;
 
-                // Limpiar inputs
-                studentNombreInput.value = '';
-                studentEdadInput.value = '';
-                studentCursoInput.value = '';
+                        // También le creamos un usuario genérico
+                        await supabaseClient.from('usuario').insert([{
+                            email: `${nombre.toLowerCase().replace(/ /g, '.')}@estudiante.com`,
+                            password: 'estudiante123',
+                            id_rol: 1,
+                            id_estudiante: est.id_estudiante
+                        }]);
+                    }
 
-                // Volver a la pantalla principal
-                studentLoginView.classList.add('hidden');
-                homeView.classList.remove('hidden');
+                    // Obtenemos el id_usuario vinculado
+                    const { data: userLink } = await supabaseClient
+                        .from('usuario')
+                        .select('id_usuario')
+                        .eq('id_estudiante', est.id_estudiante)
+                        .single();
+
+                    studentUser = { ...est, id_usuario: userLink.id_usuario };
+                    localStorage.setItem('student_session', JSON.stringify(studentUser));
+                    localStorage.removeItem('admin_session');
+                    adminUser = null;
+
+                    updateAuthUI();
+
+                    // Limpiar y entrar
+                    studentNombreInput.value = '';
+                    studentCursoInput.value = '';
+                    studentLoginView.classList.add('hidden');
+                    homeView.classList.remove('hidden');
+
+                } catch (err) {
+                    console.error("Error al ingresar estudiante:", err);
+                    alert("Hubo un error al conectar con la base de datos escolar.");
+                }
             }
         });
     }
 
     if (adminSubmitBtn) {
-        adminSubmitBtn.addEventListener('click', () => {
-            const usuario = adminUserInput.value.trim();
-            const password = adminPassInput.value.trim(); // Podríamos validarlo luego
-            const rol = adminRoleInput.value;
+        adminSubmitBtn.addEventListener('click', async () => {
+            const email = adminUserInput.value.trim();
+            const password = adminPassInput.value.trim();
 
-            if (usuario && password && (rol === "Docente" || rol === "Coordinador(a)" || rol === "Administrador del sistema")) {
-                adminUser = { usuario, rol };
-                localStorage.setItem('admin_session', JSON.stringify(adminUser));
+            if (email && password) {
+                try {
+                    // Validación real en Supabase (Estandarizado a minúsculas)
+                    const response = await supabaseClient
+                        .from('usuario')
+                        .select('*')
+                        .eq('email', email)
+                        .eq('password', password)
+                        .maybeSingle();
 
-                // Limpiar estudiante si lo habia
-                localStorage.removeItem('student_session');
-                studentUser = null;
+                    if (response.error) {
+                        console.error("Error técnico:", response.error);
+                        alert("Error de conexión: " + response.error.message);
+                        return;
+                    }
 
-                // Limpiar form
-                adminUserInput.value = '';
-                adminPassInput.value = '';
-                adminRoleInput.value = '';
+                    const usuario = response.data;
 
-                updateAuthUI();
-                // Redirigir al Home tras login exitoso
-                hideAllViews();
-                homeView.classList.remove('hidden');
+                    if (!usuario) {
+                        alert("Correo o contraseña incorrectos.");
+                        return;
+                    }
+
+                    // Buscamos su rol
+                    const { data: rolData } = await supabaseClient
+                        .from('rol')
+                        .select('nombre_rol')
+                        .eq('id_rol', usuario.id_rol)
+                        .single();
+
+                    adminUser = {
+                        email: usuario.email,
+                        usuario: usuario.email.split('@')[0],
+                        id_rol: usuario.id_rol,
+                        id_usuario: usuario.id_usuario,
+                        rol: rolData ? rolData.nombre_rol : "Administrador"
+                    };
+
+                    localStorage.setItem('admin_session', JSON.stringify(adminUser));
+                    localStorage.removeItem('student_session');
+                    studentUser = null;
+
+                    // Limpiar form
+                    adminUserInput.value = '';
+                    adminPassInput.value = '';
+                    if (adminRoleInput) adminRoleInput.value = '';
+
+                    updateAuthUI();
+                    hideAllViews();
+                    homeView.classList.remove('hidden');
+
+                } catch (err) {
+                    console.error("Error de login admin:", err);
+                    alert("Error crítico de servidor.");
+                }
             }
         });
     }
@@ -415,24 +505,34 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- LOGICA DE GESTION DE USUARIOS ---
-    let localUsers = [];
+    // --- LOGICA DE GESTION DE USUARIOS (Sincronizada con SQL) ---
+    const fetchUsersFromDB = async () => {
+        if (!supabaseClient) return [];
+        // Traemos solo personal (roles 2 y 3)
+        const { data, error } = await supabaseClient
+            .from('usuario')
+            .select('*, rol(nombre_rol)')
+            .neq('id_rol', 1); // Excluimos estudiantes de este panel
 
-    const renderUsersTable = () => {
-        localUsers = JSON.parse(localStorage.getItem('system_users')) || [
-            { usuario: 'Admin', pass: 'Admin123', rol: 'Administrador del sistema' },
-            { usuario: 'Docente1', pass: 'Docente123', rol: 'Docente' }
-        ];
+        if (error) {
+            console.error("Error al cargar usuarios:", error);
+            return [];
+        }
+        return data;
+    };
 
+    const renderUsersTable = async () => {
+        const users = await fetchUsersFromDB();
         usersTableBody.innerHTML = '';
-        localUsers.forEach((u, index) => {
+
+        users.forEach((u) => {
             const row = document.createElement('tr');
             row.className = 'user-row';
 
             row.innerHTML = `
-                <td class="col-user">${u.usuario}</td>
-                <td class="col-pass">********</td>
-                <td class="col-rol">${u.rol}</td>
+                <td class="col-user">${u.email}</td>
+                <td class="col-pass">${u.password}</td>
+                <td class="col-rol">${u.rol ? u.rol.nombre_rol : 'Sin Rol'}</td>
                 <td class="col-actions">
                     <div class="user-actions">
                         <button class="edit-icon-btn pencil" title="Editar"><i class="ph ph-pencil-simple"></i></button>
@@ -441,17 +541,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 </td>
             `;
 
-            // Lógica de Edición Inline
+            // Lógica de Edición Inline (Sincronizada)
             const pencil = row.querySelector('.pencil');
             pencil.onclick = () => {
                 row.innerHTML = `
-                    <td><input type="text" class="user-inline-input" value="${u.usuario}"></td>
-                    <td><input type="text" class="user-inline-input" value="${u.pass}"></td>
+                    <td><input type="text" class="user-inline-input" value="${u.email}"></td>
+                    <td><input type="text" class="user-inline-input" value="${u.password}" id="edit-pass-${u.id_usuario}"></td>
                     <td>
                         <select class="user-inline-select">
-                            <option ${u.rol === 'Docente' ? 'selected' : ''}>Docente</option>
-                            <option ${u.rol === 'Coordinador(a)' ? 'selected' : ''}>Coordinador(a)</option>
-                            <option ${u.rol === 'Administrador del sistema' ? 'selected' : ''}>Administrador del sistema</option>
+                            <option value="2" ${u.id_rol === 2 ? 'selected' : ''}>Docente</option>
+                            <option value="4" ${u.id_rol === 4 ? 'selected' : ''}>Coordinador</option>
+                            <option value="3" ${u.id_rol === 3 ? 'selected' : ''}>Administrador</option>
                         </select>
                     </td>
                     <td>
@@ -460,100 +560,58 @@ document.addEventListener('DOMContentLoaded', () => {
                 `;
 
                 const saveBtn = row.querySelector('.save-row-btn');
-                saveBtn.onclick = () => {
-                    const inputs = row.querySelectorAll('input');
-                    const select = row.querySelector('select');
-                    localUsers[index] = {
-                        usuario: inputs[0].value,
-                        pass: inputs[1].value,
-                        rol: select.value
-                    };
-                    renderUsersTableManual(); // Redibuja con los nuevos datos locales
+                saveBtn.onclick = async () => {
+                    const newEmail = row.querySelector('input').value;
+                    const newPass = document.getElementById(`edit-pass-${u.id_usuario}`).value;
+                    const newRol = row.querySelector('select').value;
+
+                    const updateData = { email: newEmail, id_rol: parseInt(newRol) };
+                    if (newPass) updateData.password = newPass;
+
+                    const { error } = await supabaseClient
+                        .from('usuario')
+                        .update(updateData)
+                        .eq('id_usuario', u.id_usuario);
+
+                    if (!error) {
+                        alert("Usuario actualizado en la nube.");
+                        renderUsersTable();
+                    } else {
+                        alert("Error al actualizar: " + error.message);
+                    }
                 };
             };
 
             const trash = row.querySelector('.trash');
-            trash.onclick = () => {
-                if (confirm(`¿Eliminar al usuario ${u.usuario}?`)) {
-                    localUsers.splice(index, 1);
-                    renderUsersTableManual();
+            trash.onclick = async () => {
+                if (confirm(`¿Eliminar al usuario ${u.email}?`)) {
+                    const { error } = await supabaseClient
+                        .from('usuario')
+                        .delete()
+                        .eq('id_usuario', u.id_usuario);
+
+                    if (!error) {
+                        renderUsersTable();
+                    }
                 }
             };
 
             usersTableBody.appendChild(row);
         });
-    };
-
-    // Función auxiliar para renderizar sin recargar de localStorage
-    const renderUsersTableManual = () => {
-        usersTableBody.innerHTML = '';
-        localUsers.forEach((u, index) => {
-            const row = document.createElement('tr');
-            row.className = 'user-row';
-            row.innerHTML = `
-                <td class="col-user">${u.usuario}</td>
-                <td class="col-pass">********</td>
-                <td class="col-rol">${u.rol}</td>
-                <td class="col-actions">
-                    <div class="user-actions">
-                        <button class="edit-icon-btn pencil" title="Editar"><i class="ph ph-pencil-simple"></i></button>
-                        <button class="edit-icon-btn trash" title="Eliminar"><i class="ph ph-trash"></i></button>
-                    </div>
-                </td>
-            `;
-
-            row.querySelector('.pencil').onclick = () => {
-                // Reutilizar lógica de edición...
-                pencilClick(row, u, index);
-            };
-
-            row.querySelector('.trash').onclick = () => {
-                if (confirm(`¿Eliminar al usuario ${u.usuario}?`)) {
-                    localUsers.splice(index, 1);
-                    renderUsersTableManual();
-                }
-            };
-
-            usersTableBody.appendChild(row);
-        });
-    };
-
-    const pencilClick = (row, u, index) => {
-        row.innerHTML = `
-            <td><input type="text" class="user-inline-input" value="${u.usuario}"></td>
-            <td><input type="text" class="user-inline-input" value="${u.pass}"></td>
-            <td>
-                <select class="user-inline-select">
-                    <option ${u.rol === 'Docente' ? 'selected' : ''}>Docente</option>
-                    <option ${u.rol === 'Coordinador(a)' ? 'selected' : ''}>Coordinador(a)</option>
-                    <option ${u.rol === 'Administrador del sistema' ? 'selected' : ''}>Administrador del sistema</option>
-                </select>
-            </td>
-            <td>
-                <button class="edit-icon-btn pencil save-row-btn" title="Confirmar"><i class="ph ph-check"></i></button>
-            </td>
-        `;
-        row.querySelector('.save-row-btn').onclick = () => {
-            const inputs = row.querySelectorAll('input');
-            const select = row.querySelector('select');
-            localUsers[index] = {
-                usuario: inputs[0].value,
-                pass: inputs[1].value,
-                rol: select.value
-            };
-            renderUsersTableManual();
-        };
     };
 
     if (usersAddBtn) {
-        usersAddBtn.addEventListener('click', () => {
-            const newIndex = localUsers.length;
-            const u = { usuario: 'Nuevo', pass: 'Pass123', rol: 'Docente' };
-            localUsers.push(u);
-            renderUsersTableManual();
-            // Abrir edición inmediatamente para la nueva fila
-            const lastRow = usersTableBody.lastElementChild;
-            pencilClick(lastRow, u, newIndex);
+        usersAddBtn.addEventListener('click', async () => {
+            // Añadir usuario genérico a SQL
+            const { data, error } = await supabaseClient
+                .from('usuario')
+                .insert([{ email: 'nuevo@escuela.com', password: '123', id_rol: 2 }])
+                .select();
+
+            if (!error) {
+                renderUsersTable();
+                alert("Nuevo usuario creado. Por favor edita sus datos.");
+            }
         });
     }
 
@@ -793,24 +851,83 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- SISTEMA DE MEMORIA (LocalStorage) ---
-    // Estructura: conversaciones = [ { id: 123, titulo: "Tema", mensajes: [{role: "user", parts: [{text: "Hola"}]}, {role: "model", parts: [...]}] } ]
-    let conversaciones = JSON.parse(localStorage.getItem('chatbot_history')) || [];
+    // --- SISTEMA DE MEMORIA (Supabase - Modelo Relacional) ---
+    let historialChat = []; // Usaremos 'historialChat' para coincidir con el modelo SQL
     let currentChatId = null;
 
-    renderHistory();
+    // Carga inicial desde Supabase usando la tabla Historial_Chat
+    async function loadChatHistoryFromDB() {
+        if (!studentUser && !adminUser) return;
 
-    function saveHistory() {
-        localStorage.setItem('chatbot_history', JSON.stringify(conversaciones));
-        renderHistory();
+        const userId = adminUser ? adminUser.id_usuario : (studentUser ? studentUser.id_usuario : null);
+        if (!userId) return;
+
+        try {
+            const { data, error } = await supabaseClient
+                .from('Historial_Chat')
+                .select('*')
+                .eq('id_usuario', userId)
+                .order('fecha', { ascending: true });
+
+            if (error) throw error;
+
+            // Convertimos el historial plano de SQL (pregunta/respuesta) al formato de la UI
+            historialChat = data || [];
+            reconstruirChatUI();
+        } catch (err) {
+            console.error("Error cargando historial relacional:", err);
+        }
     }
 
-    function deleteChat(id) {
-        conversaciones = conversaciones.filter(c => c.id !== id);
-        saveHistory();
-        if (currentChatId === id) {
-            if (newChatBtn) newChatBtn.click();
+    function reconstruirChatUI() {
+        if (!chatHistory) return;
+        chatHistory.innerHTML = '';
+        historialChat.forEach(registro => {
+            if (registro.pregunta) appendMessage('user', registro.pregunta);
+            if (registro.respuesta) appendMessage('bot', registro.respuesta);
+        });
+    }
+
+    loadChatHistoryFromDB();
+
+    async function saveExchangeToDB(pregunta, respuesta) {
+        const userId = adminUser ? adminUser.id_usuario : (studentUser ? studentUser.id_usuario : null);
+
+        try {
+            const { data, error } = await supabaseClient
+                .from('Historial_Chat')
+                .insert([{
+                    id_usuario: userId,
+                    pregunta: pregunta,
+                    respuesta: respuesta
+                }]);
+
+            if (error) throw error;
+        } catch (err) {
+            console.warn("No se pudo guardar el historial en SQL:", err);
         }
+    }
+
+    async function deleteChat(id) {
+        conversaciones = conversaciones.filter(c => c.id !== id);
+
+        // Guardamos en memoria local de forma segura
+        if (typeof saveHistory === 'function') {
+            saveHistory();
+        } else {
+            localStorage.setItem('chatbot_history', JSON.stringify(conversaciones));
+        }
+
+        // Si eliminamos el chat actual, volvemos al inicio
+        if (currentChatId === id) {
+            currentChatId = null;
+            chatHistory.innerHTML = '';
+            hideAllViews();
+            homeView.classList.remove('hidden');
+        }
+
+        // Sincronizamos la barra lateral
+        renderHistory();
     }
 
     function renderHistory() {
@@ -888,14 +1005,25 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function createNewChat(initialText = "Nueva conversación") {
-        currentChatId = Date.now(); // Usamos la estampa de tiempo como ID único
-        conversaciones.push({
-            id: currentChatId,
-            titulo: initialText,
+    async function createNewChat(titulo) {
+        const id = Date.now();
+        const nuevoChat = {
+            id,
+            titulo: titulo || "Nueva conversación",
             mensajes: []
-        });
-        saveHistory();
+        };
+        conversaciones.unshift(nuevoChat);
+        currentChatId = id;
+
+        // Llamada segura a la función global
+        if (typeof saveHistory === 'function') {
+            saveHistory();
+        } else {
+            localStorage.setItem('chatbot_history', JSON.stringify(conversaciones));
+        }
+
+        // Renderizamos la historia para que aparezca en el panel izquierdo
+        renderHistory();
     }
 
     // --- NAVEGACION BÁSICA ---
@@ -934,15 +1062,9 @@ document.addEventListener('DOMContentLoaded', () => {
         navBtnAdminLogin.addEventListener('click', () => {
             profileDropdown.classList.add('hidden');
 
-            // Si ya es administrador, ir directamente al panel de opciones
-            const rolesAdmin = ["Docente", "Coordinador(a)", "Administrador del sistema"];
-            if (adminUser && rolesAdmin.includes(adminUser.rol)) {
-                homeView.classList.add('hidden');
-                chatView.classList.add('hidden');
-                if (docenteAddView) docenteAddView.classList.add('hidden');
-                if (docenteEditView) docenteEditView.classList.add('hidden');
-                if (docenteDeleteView) docenteDeleteView.classList.add('hidden');
-                if (coordinadorUpdatesView) coordinadorUpdatesView.classList.add('hidden');
+            // Si ya es administrador / docente (rol 2 o 3), ir directamente al panel
+            if (adminUser && (adminUser.id_rol === 2 || adminUser.id_rol === 3)) {
+                hideAllViews();
                 if (adminView) adminView.classList.remove('hidden');
             } else {
                 // Si no, mostrar el formulario de login
@@ -996,12 +1118,14 @@ document.addEventListener('DOMContentLoaded', () => {
             chatHistory.innerHTML = '';
 
             // Creamos un chat titulado igual a la opción cliqueada
-            createNewChat(text);
+            await createNewChat(text);
             appendMessage('user', text);
 
             let chat = conversaciones.find(c => c.id === currentChatId);
-            chat.mensajes.push({ role: "user", parts: [{ text: text }] });
-            saveHistory();
+            if (chat) {
+                chat.mensajes.push({ role: "user", parts: [{ text: text }] });
+                saveHistory();
+            }
 
             await getAIResponse(text, chat);
         });
@@ -1011,17 +1135,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (homeChatInput && homeSendBtn) {
         const handleHomeChat = async () => {
             const text = homeChatInput.value.trim();
-            if(!text) return;
+            if (!text) return;
 
             homeChatInput.value = '';
             hideAllViews();
             chatView.classList.remove('hidden');
-            
+
             if (!currentChatId) {
-                createNewChat(text);
+                await createNewChat(text);
             }
 
             appendMessage('user', text);
+            // Guardamos localmente
             let chat = conversaciones.find(c => c.id === currentChatId);
             chat.mensajes.push({ role: "user", parts: [{ text: text }] });
             saveHistory();
@@ -1035,31 +1160,41 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- ENVIO Y COMUNICACION IA ---
+    // --- ENVIO Y COMUNICACION IA (Re-vínculo Seguro) ---
     const sendMessage = async () => {
+        console.log("Evento sendMessage disparado");
         const text = chatInput.value.trim();
         if (!text) return;
 
         chatInput.value = '';
 
-        // Si mandan mensaje pero no habian creado chat, lo creamos
         if (!currentChatId) {
-            createNewChat(text);
+            console.log("No habia chat, creando uno...");
+            await createNewChat(text);
         }
 
         appendMessage('user', text);
 
         let chat = conversaciones.find(c => c.id === currentChatId);
-        chat.mensajes.push({ role: "user", parts: [{ text: text }] });
-        saveHistory();
+        if (chat) {
+            chat.mensajes.push({ role: "user", parts: [{ text: text }] });
+            saveHistory();
+        }
 
+        console.log("Llamando a getAIResponse...");
         await getAIResponse(text, chat);
     };
 
-    sendBtn.addEventListener('click', sendMessage);
-    chatInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') sendMessage();
-    });
+    if (sendBtn) {
+        sendBtn.onclick = sendMessage;
+        console.log("Botón enviar vinculado.");
+    }
+    if (chatInput) {
+        chatInput.onkeypress = (e) => {
+            if (e.key === 'Enter') sendMessage();
+        };
+        console.log("Input de chat vinculado.");
+    }
 
     function appendMessage(sender, text) {
         const messageWrapper = document.createElement('div');
@@ -1118,11 +1253,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const showRobotExclamation = () => {
         const greetings = ["¡Hola!", "¡Qué tal!", "¡Bienvenido!", "¡Gusto verte!", "¡Holi!"];
         const text = greetings[Math.floor(Math.random() * greetings.length)];
-        
+
         const floatingText = document.createElement('div');
         floatingText.className = 'robot-exclamation greeting-bubble';
         floatingText.textContent = text;
-        
+
         const container = document.querySelector('.bot-glow-container');
         if (container) {
             container.appendChild(floatingText);
@@ -1139,14 +1274,14 @@ document.addEventListener('DOMContentLoaded', () => {
             showRobotExclamation();
 
             // Solo saludo con la mano
-            if(robotHandRight) robotHandRight.classList.add('waving-hand');
+            if (robotHandRight) robotHandRight.classList.add('waving-hand');
 
             // Volver a la normalidad automáticamente después de 2 segundos
             greetingTimeout = setTimeout(() => {
-                if(robotHandRight) robotHandRight.classList.remove('waving-hand');
+                if (robotHandRight) robotHandRight.classList.remove('waving-hand');
                 isRobotGreeting = false;
             }, 2000);
-            
+
             isRobotGreeting = true;
         });
     }
@@ -1154,12 +1289,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- BUSCADOR DE CONTEXTO RELEVANTE ---
     const getRelevantContext = (query, fullText) => {
         if (!fullText) return "No hay conocimiento cargado.";
-        
+
         // Dividimos el documento por 'Unidad de Competencia' o 'Módulo' o 'Página'
         const segments = fullText.split(/(?=Unidad de Competencia \d+:|MÓDULO \d+:|Página \d+)/gi);
-        
+
         const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-        
+
         const scored = segments.map(seg => {
             let score = 0;
             queryWords.forEach(word => {
@@ -1184,9 +1319,129 @@ document.addEventListener('DOMContentLoaded', () => {
         return topSegments.join('\n\n');
     };
 
+    // --- BUSCADOR POR PALABRAS CLAVE (Requerimiento Académico) ---
+    async function buscarEnBaseConocimiento(texto) {
+        if (!supabaseClient) return null;
+        const palabras = texto.toLowerCase().split(' ').filter(p => p.length > 2);
+
+        try {
+            console.log("Buscando en SQL:", palabras);
+            const { data: coincidencias, error } = await supabaseClient
+                .from('palabras_clave')
+                .select('id_conocimiento')
+                .in('palabra', palabras);
+
+            if (error || !coincidencias || coincidencias.length === 0) return null;
+
+            const idCon = coincidencias[0].id_conocimiento;
+            const { data: conSQL, error: errC } = await supabaseClient
+                .from('conocimiento_bot')
+                .select('respuesta')
+                .eq('id_conocimiento', idCon)
+                .maybeSingle();
+
+            return (errC || !conSQL) ? null : conSQL.respuesta;
+        } catch (e) {
+            console.warn("Fallo en búsqueda SQL, usando IA:", e);
+            return null;
+        }
+    }
+
+    // --- MOTOR DE MIGRACIÓN: TXT -> SQL ---
+    async function migrarTxtASupabase() {
+        if (!conocimiento) {
+            alert("No hay archivo de conocimiento cargado para migrar.");
+            return;
+        }
+
+        console.log("Iniciando migración inteligente a SQL...");
+
+        try {
+            const fragmento = conocimiento.substring(0, 3000);
+            const promptMigracion = `Extrae 5 conceptos académicos clave de este texto y devuélvelos estrictamente en formato JSON. 
+            El formato debe ser un array de objetos: [{"materia": "nombre", "respuesta": "explicación corta", "keywords": ["palabra1", "palabra2"]}].
+            TEXTO: ${fragmento}`;
+
+            const response = await puter.ai.chat(promptMigracion);
+            const data = JSON.parse(response.toString().replace(/```json|```/g, ''));
+
+            for (const item of data) {
+                let { data: cat } = await supabaseClient.from('categoria').select('id_categoria').eq('nombre_materia', item.materia).maybeSingle();
+                if (!cat) {
+                    const { data: newCat } = await supabaseClient.from('categoria').insert([{ nombre_materia: item.materia }]).select();
+                    cat = newCat[0];
+                }
+
+                const { data: con } = await supabaseClient.from('conocimiento_bot').insert([
+                    { id_categoria: cat.id_categoria, respuesta: item.respuesta }
+                ]).select();
+
+                const kwInsert = item.keywords.map(k => ({ id_conocimiento: con[0].id_conocimiento, palabra: k.toLowerCase() }));
+                await supabaseClient.from('palabras_clave').insert(kwInsert);
+            }
+            alert("Migración completada.");
+        } catch (err) {
+            console.error("Error en migración:", err);
+            alert("Error al migrar.");
+        }
+    }
+
+    // Exponer la función para poder llamarla desde la consola o un botón
+    window.migrarConocimiento = migrarTxtASupabase;
+
+    const btnMigrate = document.getElementById('admin-nav-migrate-btn');
+    if (btnMigrate) {
+        btnMigrate.addEventListener('click', migrarTxtASupabase);
+    }
+
+    async function saveExchangeToDB(pregunta, respuesta) {
+        if (!supabaseClient) return; // No hacemos nada si no hay DB
+        const userID = (studentUser && studentUser.id_usuario) || (adminUser && adminUser.id_usuario);
+        if (!userID) {
+            console.log("Chat de invitado: No se guarda en la nube por privacidad.");
+            return;
+        }
+
+        try {
+            await supabaseClient.from('historial_chat').insert([
+                {
+                    id_usuario: userID,
+                    pregunta: pregunta,
+                    respuesta: respuesta
+                }
+            ]);
+        } catch (err) {
+            console.error("Error al guardar historial:", err);
+        }
+    }
+
     async function getAIResponse(userText, chat) {
         // Mostramos feedback visual inicial
-        const loadingMsg = appendMessage('bot', '<span class="typing">Consultando a Puter AI...</span>');
+        const loadingMsg = appendMessage('bot', '<span class="typing">Analizando pregunta en base de datos...</span>');
+
+        // PASO 1: Intentar buscar en la Base de Datos SQL (Solo si está configurado)
+        let respuestaSQL = null;
+        if (supabaseClient) {
+            respuestaSQL = await buscarEnBaseConocimiento(userText);
+        }
+
+        if (respuestaSQL) {
+            chatHistory.removeChild(loadingMsg);
+            appendMessage('bot', respuestaSQL);
+
+            if (chat) {
+                chat.mensajes.push({ role: "model", parts: [{ text: respuestaSQL }] });
+                saveHistory();
+            }
+
+            await saveExchangeToDB(userText, respuestaSQL);
+            return; // Detenemos aquí si SQL fue suficiente
+        }
+
+        // PASO 2: Si no está en SQL, usamos la IA como respaldo
+        // Actualizamos mensaje
+        const typingSpan = loadingMsg.querySelector('.typing');
+        if (typingSpan) typingSpan.textContent = "Consultando con Puter AI...";
 
         // Optimización: Solo enviamos el contexto realmente necesario del PDF
         const relevantConocimiento = getRelevantContext(userText, conocimiento);
@@ -1224,8 +1479,8 @@ ${extraText}
             });
 
             // Llamada con STREAMING para respuesta instantánea (Puter v2)
-            const stream = await puter.ai.chat(messages, { 
-                stream: true, 
+            const stream = await puter.ai.chat(messages, {
+                stream: true,
                 model: 'gpt-4o-mini' // Usamos un modelo más rápido y eficiente
             });
 
@@ -1233,7 +1488,7 @@ ${extraText}
             chatHistory.removeChild(loadingMsg);
             const botMsgWrapper = appendMessage('bot', '');
             const botMsgDiv = botMsgWrapper.querySelector('.message');
-            
+
             let fullText = "";
             for await (const part of stream) {
                 if (part.text) {
@@ -1243,22 +1498,25 @@ ${extraText}
                         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                         .replace(/\*(.*?)\*/g, '<em>$1</em>')
                         .replace(/\n/g, '<br>');
-                    
+
                     // Solo scrolleamos si estamos cerca del final
                     chatHistory.scrollTop = chatHistory.scrollHeight;
                 }
             }
 
-            // Guardamos en historial local al terminar
+            // Al finalizar el streaming, guardamos el par pregunta/respuesta en SQL
             if (chat) {
                 chat.mensajes.push({ role: "model", parts: [{ text: fullText }] });
                 saveHistory();
+
+                // NUEVO: Guardar en la tabla relacional Historial_Chat de SQL
+                await saveExchangeToDB(userText, fullText);
             }
 
         } catch (err) {
             console.error(err);
             if (loadingMsg && loadingMsg.parentNode) chatHistory.removeChild(loadingMsg);
-            
+
             const errorMessages = [
                 "¡Vaya! Puter AI está tomando un respiro. 🍃 Inténtalo de nuevo.",
                 "¡Ups! Los circuitos de Puter se enredaron un poco. 🤖 ¿Me lo repites?",
@@ -1274,4 +1532,7 @@ ${extraText}
             }
         }
     }
+
+    renderHistory();
+    updateAuthUI();
 });
