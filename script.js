@@ -251,15 +251,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (loginView) loginView.classList.add('hidden');
             if (studentLoginView) studentLoginView.classList.add('hidden');
+            if (homeView) homeView.classList.remove('hidden');
         } else if (studentUser && studentUser.nombre) {
             if (studentNameDisplay) {
                 studentNameDisplay.textContent = studentUser.nombre;
                 studentNameDisplay.classList.remove('hidden');
             }
             if (normalProfile) normalProfile.classList.remove('hidden');
+            if (loginView) loginView.classList.add('hidden');
+            if (studentLoginView) studentLoginView.classList.add('hidden');
+            if (homeView) homeView.classList.remove('hidden');
         } else {
             if (studentNameDisplay) studentNameDisplay.classList.add('hidden');
             if (normalProfile) normalProfile.classList.remove('hidden');
+            hideAllViews();
+            if (studentLoginView) studentLoginView.classList.remove('hidden');
         }
     };
 
@@ -419,9 +425,6 @@ document.addEventListener('DOMContentLoaded', () => {
             currentChatId = null;
             renderHistory();
             chatHistory.innerHTML = '';
-
-            hideAllViews();
-            homeView.classList.remove('hidden');
         });
     }
 
@@ -1040,8 +1043,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Menú de opciones de perfil
-    document.querySelectorAll('.profile-icon').forEach(icon => {
-        icon.addEventListener('click', (e) => {
+    document.querySelectorAll('.profile-container').forEach(container => {
+        container.addEventListener('click', (e) => {
             e.stopPropagation();
             if (profileDropdown) profileDropdown.classList.toggle('hidden');
         });
