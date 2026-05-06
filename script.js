@@ -252,6 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (loginView) loginView.classList.add('hidden');
             if (studentLoginView) studentLoginView.classList.add('hidden');
             if (homeView) homeView.classList.remove('hidden');
+            document.body.classList.remove('logged-out');
         } else if (studentUser && studentUser.nombre) {
             if (studentNameDisplay) {
                 studentNameDisplay.textContent = studentUser.nombre;
@@ -261,11 +262,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (loginView) loginView.classList.add('hidden');
             if (studentLoginView) studentLoginView.classList.add('hidden');
             if (homeView) homeView.classList.remove('hidden');
+            document.body.classList.remove('logged-out');
         } else {
             if (studentNameDisplay) studentNameDisplay.classList.add('hidden');
             if (normalProfile) normalProfile.classList.remove('hidden');
             hideAllViews();
             if (studentLoginView) studentLoginView.classList.remove('hidden');
+            document.body.classList.add('logged-out');
         }
     };
 

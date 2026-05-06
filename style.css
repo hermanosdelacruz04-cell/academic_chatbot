@@ -1873,3 +1873,13 @@ body.no-animations .dynamic-bg-color {
     0% { transform: translate(0, 0) rotate(0deg); }
     100% { transform: translate(15px, -25px) rotate(30deg); }
 }
+
+/* Modos cuando el usuario no está logueado */
+body.logged-out .sidebar {
+    display: none !important;
+}
+
+body.logged-out .brand {
+    pointer-events: none !important;
+    opacity: 0.8;
+}
