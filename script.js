@@ -1112,6 +1112,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Clic en botones gigantes de colores (Opciones sugeridas)
     pillButtons.forEach(btn => {
         btn.addEventListener('click', async () => {
+            if (!adminUser && !studentUser) {
+                alert("Debes iniciar sesión para usar el chat.");
+                return;
+            }
             const text = btn.textContent.trim();
 
             homeView.classList.add('hidden');
@@ -1137,6 +1141,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Lógica para la barra de chat de la HOME
     if (homeChatInput && homeSendBtn) {
         const handleHomeChat = async () => {
+            if (!adminUser && !studentUser) {
+                alert("Debes iniciar sesión para usar el chat.");
+                return;
+            }
             const text = homeChatInput.value.trim();
             if (!text) return;
 
@@ -1165,6 +1173,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- ENVIO Y COMUNICACION IA (Re-vínculo Seguro) ---
     const sendMessage = async () => {
+        if (!adminUser && !studentUser) {
+            alert("Debes iniciar sesión para usar el chat.");
+            return;
+        }
         console.log("Evento sendMessage disparado");
         const text = chatInput.value.trim();
         if (!text) return;
